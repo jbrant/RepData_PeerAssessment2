@@ -1,0 +1,10 @@
+---
+title: "Health and Economic effects of Inclimate Weather in the United States"
+author: "Jonathan Brant"
+date: "13 September 2014"
+output: 
+  html_document:
+    keep_md: true
+---
+
+## Synposis
