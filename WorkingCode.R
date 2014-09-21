@@ -133,7 +133,7 @@ grid.arrange(
     gp = gpar(fontface = "bold", col = "grey20", fontsize = 12)))
 
 ######################################################
-## Top Fatality Trend (not being used right now)
+## Top Fatality Trend
 ######################################################
 
 ## Extract tornado data

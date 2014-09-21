@@ -1,10 +1,328 @@
 ---
-title: "Health and Economic effects of Inclimate Weather in the United States"
+title: "Health and Fiscal effects of Severe Weather in the United States"
 author: "Jonathan Brant"
-date: "13 September 2014"
+date: "September 20, 2014"
 output: 
   html_document:
     keep_md: true
 ---
 
 ## Synposis
+Despite increasing preparedness for severe storms and other harsh climate events, such weather conditions remain a significant driver for both fiscal and emergency preparedness policies. Government organizations such as the U.S. National Oceanic and Atmospheric Administration are keenly interested in tracking mortality and economic impacts of severe weather events.  To that end, NOAA has been collecting data on the health and economic impacts of severe storms since the 1950s and has estbalished an extensive observational base which can be used for deriving improved building codes, emergency preparedness/response procedures, and other related protocols.
+
+**This analysis focuses on the following key areas:**
+<ul>
+<li>The top 10 weather events leading to the highest number of fatalities and injuries across the United States, as well as a trend analysis of fatlities/injuries from the beginning of the collection period to the present day.</li>
+<li>The top 10 weather events leading to the most substantial economic impacts for both property and crops across the United States.</li>
+</ul>
+
+Perhaps unsurprisingly, it was determined that tornados were the most significant drivers for both fatalities and injuries as well as property damage, likely due to their unpredictable behavior and very high wind speeds.  On an encouraging note, it appears that fatalities/injuries due to weather-related events have been trending slightly downard over the past 60 years, possibly due to progress in early-warning systems as well as structural reinforcements that are required by local and state construction codes.  In similarly logical fashion, it was found that drought was the top driver for crop damage.
+
+## Data Processing
+
+### Dependencing loading and file reading
+
+The following libraries are required:
+<ul>
+<li>ggplot2</li>
+<li>lubridate</li>
+<li>plyr</li>
+<li>gridExtra</li>
+<li>scales</li>
+</ul>
+
+```{r loadLibraries, warning=FALSE, message=FALSE}
+require(ggplot2)
+require(lubridate)
+require(plyr)
+require(gridExtra)
+require(scales)
+```
+
+The input data is then read from the CSV within the zip file.
+
+```{r readCSV, cache=TRUE}
+storm.data <- read.table(
+  bzfile(
+    description = "repdata-data-StormData.csv.bz2", 
+    open = "r"),
+  header = TRUE,
+  sep = ",")
+```
+
+### Data Tidying
+
+Subset the full dataset to include only the needed fields (this should speed up analysis).
+
+```{r subsetWorkingStormData, cache=TRUE}
+working.storm.data <- storm.data[, c(
+  "EVTYPE", 
+  "BGN_DATE",
+  "FATALITIES", 
+  "INJURIES", 
+  "PROPDMG", 
+  "PROPDMGEXP", 
+  "CROPDMG", 
+  "CROPDMGEXP")]
+```
+
+Add POSIX formatted date (for later trend analysis)
+
+```{r datePosixConversion, cache=TRUE}
+working.storm.data$EVENT_DATE <- as.POSIXct(
+  working.storm.data$BGN_DATE, 
+  format = "%m/%d/%Y %H:%M:%S")
+```
+
+Convert property damage and crop damage units to uppercase
+
+```{r unitCaseConversion, cache=TRUE}
+working.storm.data$PROPDMGEXP <- factor(toupper(working.storm.data$PROPDMGEXP))
+working.storm.data$CROPDMGEXP <- factor(toupper(working.storm.data$CROPDMGEXP))
+```
+
+Enumerate the valid exponent codes and "expand" both property and crop damage values to their actual values so that we don't have to rely on a multiplier column.
+
+
+```{r expandDamageValues, cache=TRUE}
+## List of valid exponent codes
+validExponents <- c("H", "K", "M", "C")
+
+## Expand property damage values
+working.storm.data$PROPDMG[(working.storm.data$PROPDMGEXP == "H")] <- 
+  working.storm.data$PROPDMG[(working.storm.data$PROPDMGEXP == "H")] * 10^2
+working.storm.data$PROPDMG[(working.storm.data$PROPDMGEXP == "K")] <- 
+  working.storm.data$PROPDMG[(working.storm.data$PROPDMGEXP == "K")] * 10^3
+working.storm.data$PROPDMG[(working.storm.data$PROPDMGEXP == "M")] <- 
+  working.storm.data$PROPDMG[(working.storm.data$PROPDMGEXP == "M")] * 10^6
+working.storm.data$PROPDMG[(working.storm.data$PROPDMGEXP == "B")] <- 
+  working.storm.data$PROPDMG[(working.storm.data$PROPDMGEXP == "B")] * 10^9
+working.storm.data$PROPDMG[!(working.storm.data$PROPDMGEXP %in% validExponents)] <- 0
+
+## Expand crop damage values
+working.storm.data$CROPDMG[(working.storm.data$CROPDMGEXP == "H")] <- 
+  working.storm.data$CROPDMG[(working.storm.data$CROPDMGEXP == "H")] * 10^2
+working.storm.data$CROPDMG[(working.storm.data$CROPDMGEXP == "K")] <- 
+  working.storm.data$CROPDMG[(working.storm.data$CROPDMGEXP == "K")] * 10^3
+working.storm.data$CROPDMG[(working.storm.data$CROPDMGEXP == "M")] <- 
+  working.storm.data$CROPDMG[(working.storm.data$CROPDMGEXP == "M")] * 10^6
+working.storm.data$CROPDMG[(working.storm.data$CROPDMGEXP == "B")] <- 
+  working.storm.data$CROPDMG[(working.storm.data$CROPDMGEXP == "B")] * 10^9
+working.storm.data$CROPDMG[!(working.storm.data$CROPDMGEXP %in% validExponents)] <- 0
+```
+
+Drop the exponent fields and begin date (the non-POSIX one) fields as they are no longer needed.
+
+```{r dropExponentFields, cache=TRUE}
+working.storm.data <- working.storm.data[, !(names(working.storm.data) %in% c(
+  "BGN_DATE", 
+  "PROPDMGEXP", 
+  "CROPDMGEXP"))]
+```
+
+Rename the remaining fields to promote readability.
+
+```{r renameStormDataFields, cache=TRUE}
+names(working.storm.data) <- c(
+  "event.type",
+  "fatalities", 
+  "injuries", 
+  "property.damage", 
+  "crop.damage",
+  "event.date")
+```
+
+## Results
+
+Below are the results for the top 10 weather events that were the primary drivers for fatalities and injuries along with a trend analysis of their combined occurrence since the 1950s.  Similar information is then presented for the top 10 weather events driving property and crop damage expenses.
+
+### Impact of Severe Weather on Public Health
+
+As shown in Figure 1, tornados are responsible for the vast majority of both fatalities and injuries.
+
+To prepare the fatality data for display, aggregate and order fatality data for the top 10 events.
+
+```{r aggregateOrderTop10FatalityData, cache=TRUE}
+fatalities <- aggregate(fatalities ~ event.type, data = working.storm.data, FUN = sum)
+fatalities <- fatalities[order(-fatalities$fatalities),][1:10,]
+fatalities$event.type <- factor(fatalities$event.type, levels = fatalities$event.type)
+```
+
+Then create the fatality bar plot (this will not display it yet as we're storing it in a variable).
+
+```{r top10FatalityPlot}
+fatalities.plot <- ggplot(fatalities, aes(
+    x = event.type, 
+    y = fatalities, 
+    label = fatalities, 
+    fill = fatalities)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Top 10 Events Responsible for Fatalities", 
+       x = "Event Type", 
+       y = "Number of Fatalities") +
+  theme(plot.title = element_text(face = "bold", size = 16, vjust = 1),
+        axis.title.x = element_text(face = "bold"),
+        axis.title.y = element_text(face = "bold"),
+        axis.text.x = element_text(angle = 90, hjust = 1),
+        legend.title = element_blank())
+```
+
+To prepare the injury data for display, aggregate and order fatality data for the top 10 events.
+
+```{r aggregateOrderTop10InjuryData, cache=TRUE}
+injuries <- aggregate(injuries ~ event.type, data = working.storm.data, FUN = sum)
+injuries <- injuries[order(-injuries$injuries),][1:10,]
+injuries$event.type <- factor(injuries$event.type, levels = injuries$event.type)
+```
+
+Then create the injury bar plot (this will not display it yet as we're storing it in a variable).
+
+```{r top10InjuryPlot}
+injuries.plot <- ggplot(injuries, aes(x = event.type, y = injuries, fill = injuries)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Top 10 Events Responsible for Injuries", 
+       x = "Event Type", 
+       y = "Number of Injuries") +
+  theme(plot.title = element_text(face = "bold", size = 16, vjust = 1),
+        axis.title.x = element_text(face = "bold"),
+        axis.title.y = element_text(face = "bold"),
+        axis.text.x = element_text(angle = 90, hjust = 1),
+        legend.title = element_blank())
+```
+
+Finally, arrange the two plots into a single figure with two columns.
+
+```{r displayFigure1, fig.width=12}
+grid.arrange(
+  fatalities.plot, 
+  injuries.plot, 
+  ncol = 2, 
+  sub = textGrob(
+    "Figure 1 - Top Events Contributing to Injuries/Fatalities", 
+    gp = gpar(fontface = "bold", col = "grey20", fontsize = 12)))
+```
+
+Another potential area of interest is how the frequency of fatalities and injuries due to severe weather have changed over time.  Figure 2 indicates that despite outliers for certain years, the overall mortality/injury frequency is trending downward.
+
+In order to prepare the data for trend analysis, we need to aggregate the data up to the year level.  the below code snippet extracts the data related to tornado events and summarizes to the year grain.
+
+```{r tornadoInjuryTrendData, cache=TRUE}
+## Extract tornado data
+tornado.data <- working.storm.data[(working.storm.data$event.type == "TORNADO"),]
+
+## Round to year level
+tornado.data$event.year <- floor_date(tornado.data$event.date, "year")
+
+## Aggregate fatalities and injuries per year
+tornado.health.effects.by.year <- ddply(tornado.data, "event.year", summarise, health.effects = sum(fatalities, injuries))
+```
+
+Then create the fatality/injury trend plot (this will not display it yet as we're storing it in a variable).
+
+```{r tornadoFatalityInjuryTrend}
+health.effects.trend.plot <- 
+  ggplot(
+    data = tornado.health.effects.by.year, 
+    aes(x = event.year, y = health.effects)) +
+  geom_point() +
+  geom_smooth(method = "lm") +
+  labs(title = "Inclimate Weather Health Effects by Year", 
+       x = "Event Year", 
+       y = "Number of Fatalities/Injuries") +
+  theme(plot.title = element_text(face = "bold", size = 16, vjust = 1),
+        axis.title.x = element_text(face = "bold"),
+        axis.title.y = element_text(face = "bold"))
+```
+
+Finally, display the plot with appropriate labels.
+
+```{r displayFigure2}
+grid.arrange(health.effects.trend.plot,
+             sub = textGrob(
+               "Figure 2 - Health Effects Trend by Year", 
+               gp = gpar(fontface = "bold", col = "grey20", fontsize = 12)))
+```
+
+### Impact of Severe Weather on Local Economies
+
+In addition to health effects, one must also consider the economic impacts of severe weather.  In all areas, property damage is a concern, but some of the most severe weather occurs in the rural flatlands where farms drive the local economy and crop damage can have devastating effects.
+
+Analyzing Figure 3, tornados are once again the primary weather events leading to property damage expenses, inflicting greater than $50 billion since the beginning of data collection.  For crop damage, however, tornados aren't even in the top 10 events, but rather drought has the most damaging effects.  Regional rainfall shortages can therefore have a direct effect on local farming economies.
+
+To prepare the property damage data for display, aggregate and order property damage data for the top 10 events.
+
+```{r aggregateOrderTop10PropertyDamageData, cache=TRUE}
+property.damage <- aggregate(property.damage ~ event.type, data = working.storm.data, FUN = sum)
+property.damage <- property.damage[order(-property.damage$property.damage),][1:10,]
+property.damage$event.type <- factor(property.damage$event.type, levels = property.damage$event.type)
+```
+
+Then create the property damage bar plot (this will not display it yet as we're storing it in a variable).
+
+```{r top10PropertyDamagePlot}
+property.damage.plot <- ggplot(property.damage, aes(
+    x = event.type, 
+    y = property.damage, 
+    label = property.damage, 
+    fill = property.damage
+  )) +
+  geom_bar(stat = "identity") +
+  labs(title = "Top 10 Events Responsible for Property Damage", 
+       x = "Event Type", 
+       y = "Cost of Property Damage") +
+  scale_y_continuous(
+    labels = function(x) paste0(
+      "$", 
+      format(x/10^9, big.mark = ",", scientific = FALSE),
+      "B")) +
+  theme(plot.title = element_text(face = "bold", size = 16, vjust = 1),
+        axis.title.x = element_text(face = "bold"),
+        axis.title.y = element_text(face = "bold"),
+        axis.text.x = element_text(angle = 90, hjust = 1),
+        legend.title = element_blank())
+```
+
+To prepare the crop damage data for display, aggregate and order crop damage data for the top 10 events.
+
+```{r aggregateOrderTop10CropDamageData, cache=TRUE}
+crop.damage <- aggregate(crop.damage ~ event.type, data = working.storm.data, FUN = sum)
+crop.damage <- crop.damage[order(-crop.damage$crop.damage),][1:10,]
+crop.damage$event.type <- factor(crop.damage$event.type, levels = crop.damage$event.type)
+```
+
+Then create the crop damage bar plot (this will not display it yet as we're storing it in a variable).
+
+```{r top10CropDamagePlot}
+crop.damage.plot <- ggplot(crop.damage, aes(
+  x = event.type, 
+  y = crop.damage, 
+  label = crop.damage, 
+  fill = crop.damage
+)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Top 10 Events Responsible for Crop Damage", 
+       x = "Event Type", 
+       y = "Cost of Crop Damage") +
+  scale_y_continuous(
+    labels = function(x) paste0(
+      "$", 
+      format(x/10^9, big.mark = ",", scientific = FALSE),
+      "B")) +
+  theme(plot.title = element_text(face = "bold", size = 16, vjust = 1),
+        axis.title.x = element_text(face = "bold"),
+        axis.title.y = element_text(face = "bold"),
+        axis.text.x = element_text(angle = 90, hjust = 1),
+        legend.title = element_blank())
+```
+
+Finally, arrange the two plots into a single figure with two columns.
+
+```{r displayFigure3, fig.width=12}
+grid.arrange(
+  property.damage.plot, 
+  crop.damage.plot, 
+  ncol = 2, 
+  sub = textGrob(
+    "Figure 3 - Top Events Contributing to Property/Crop Damage", 
+    gp = gpar(fontface = "bold", col = "grey20", fontsize = 12)))
+```
